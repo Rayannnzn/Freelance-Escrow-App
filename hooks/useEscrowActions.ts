@@ -8,6 +8,7 @@ import { useAnchorProgram } from './useAnchorProgram';
 import { getEscrowPDA, PROGRAM_ID } from '@/lib/solana/program';
 import { parseEscrowError } from '@/lib/solana/errors';
 import { getExplorerTxUrl } from '@/lib/solana/explorer';
+import { saveCompletedEscrow } from '@/lib/escrow-cache';
 import { toast } from 'sonner';
 
 // ─── Initialize Escrow ──────────────────────────────────────────────────────
@@ -120,9 +121,12 @@ export function useApproveWork() {
     mutationFn: async ({
       freelancerAddress,
       pdaAddress,
+      // Snapshot data captured before tx so we can persist after PDA closes
+      snapshot,
     }: {
       freelancerAddress: string;
       pdaAddress: string;
+      snapshot: { client: string; freelancer: string; amountSol: number };
     }) => {
       if (!program || !publicKey) throw new Error('Wallet not connected');
 
@@ -136,25 +140,32 @@ export function useApproveWork() {
         })
         .rpc();
 
-      return { signature: tx };
-    },
-    onSuccess: (data) => {
-      toast.success('Work approved! Funds released.', {
-        description: 'SOL has been transferred to the freelancer.',
-        action: {
-          label: 'View TX',
-          onClick: () => window.open(getExplorerTxUrl(data.signature), '_blank'),
-        },
-        duration: 8000,
+      // ─── Cache the completed escrow BEFORE the query refetch wipes it ───
+      saveCompletedEscrow({
+        pdaAddress,
+        client: snapshot.client,
+        freelancer: snapshot.freelancer,
+        amountSol: snapshot.amountSol,
+        completedAt: new Date().toISOString(),
+        approvalSignature: tx,
+        closedReason: 'approved',
       });
-      queryClient.invalidateQueries({ queryKey: ['escrows'] });
-      queryClient.invalidateQueries({ queryKey: ['escrow-detail'] });
-      queryClient.invalidateQueries({ queryKey: ['wallet-balance'] });
+
+      return {
+        signature: tx,
+        pdaAddress,
+        client: snapshot.client,
+        freelancer: snapshot.freelancer,
+        amountSol: snapshot.amountSol,
+        completedAt: new Date().toISOString(),
+      };
     },
     onError: (error) => {
       const parsed = parseEscrowError(error);
       toast.error(parsed.title, { description: parsed.description });
     },
+    // Note: onSuccess is NOT here — the detail page handles it directly
+    // so it can show the success modal with the returned data.
   });
 }
 
