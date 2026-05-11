@@ -1,46 +1,60 @@
 {
-  "version": "0.1.0",
-  "name": "freelance_escrow",
+  "address": "AErMH45vvaUGaSngNFmhyDeCXfBUfiduiWuZjAbeTUrG",
+  "metadata": {
+    "name": "freelance_escrow",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
   "instructions": [
     {
-      "name": "initializeEscrow",
+      "name": "initialize_escrow",
+      "discriminator": [243, 160, 77, 153, 11, 92, 48, 209],
       "accounts": [
-        { "name": "client", "isMut": true, "isSigner": true },
-        { "name": "freelancer", "isMut": false, "isSigner": false },
-        { "name": "escrow", "isMut": true, "isSigner": false },
-        { "name": "systemProgram", "isMut": false, "isSigner": false }
+        { "name": "client", "writable": true, "signer": true },
+        { "name": "freelancer" },
+        { "name": "escrow", "writable": true, "pda": {
+          "seeds": [
+            { "kind": "const", "value": [101, 115, 99, 114, 111, 119] },
+            { "kind": "account", "path": "client" },
+            { "kind": "account", "path": "freelancer" }
+          ]
+        }},
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": [
         { "name": "amount", "type": "u64" },
-        { "name": "timeoutAt", "type": "i64" }
+        { "name": "timeout_at", "type": "i64" }
       ]
     },
     {
-      "name": "submitWork",
+      "name": "submit_work",
+      "discriminator": [158, 80, 101, 51, 114, 130, 101, 253],
       "accounts": [
-        { "name": "escrow", "isMut": true, "isSigner": false },
-        { "name": "client", "isMut": false, "isSigner": false },
-        { "name": "freelancer", "isMut": true, "isSigner": true }
+        { "name": "escrow", "writable": true },
+        { "name": "client" },
+        { "name": "freelancer", "writable": true, "signer": true }
       ],
       "args": []
     },
     {
-      "name": "approveWork",
+      "name": "approve_work",
+      "discriminator": [181, 118, 45, 143, 204, 88, 237, 109],
       "accounts": [
-        { "name": "client", "isMut": true, "isSigner": true },
-        { "name": "freelancer", "isMut": true, "isSigner": false },
-        { "name": "escrow", "isMut": true, "isSigner": false },
-        { "name": "systemProgram", "isMut": false, "isSigner": false }
+        { "name": "client", "writable": true, "signer": true },
+        { "name": "freelancer", "writable": true },
+        { "name": "escrow", "writable": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": []
     },
     {
-      "name": "claimTimeout",
+      "name": "claim_timeout",
+      "discriminator": [130, 234, 45, 53, 120, 90, 86, 178],
       "accounts": [
-        { "name": "freelancer", "isMut": true, "isSigner": true },
-        { "name": "client", "isMut": true, "isSigner": false },
-        { "name": "escrow", "isMut": true, "isSigner": false },
-        { "name": "systemProgram", "isMut": false, "isSigner": false }
+        { "name": "freelancer", "writable": true, "signer": true },
+        { "name": "client", "writable": true },
+        { "name": "escrow", "writable": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": []
     }
@@ -48,19 +62,7 @@
   "accounts": [
     {
       "name": "EscrowAccount",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          { "name": "client", "type": "publicKey" },
-          { "name": "freelancer", "type": "publicKey" },
-          { "name": "amount", "type": "u64" },
-          { "name": "createdAt", "type": "i64" },
-          { "name": "timeoutAt", "type": "i64" },
-          { "name": "workSubmitted", "type": "bool" },
-          { "name": "approved", "type": "bool" },
-          { "name": "bump", "type": "u8" }
-        ]
-      }
+      "discriminator": [36, 69, 48, 18, 128, 225, 125, 135]
     }
   ],
   "errors": [
@@ -72,5 +74,22 @@
     { "code": 6005, "name": "NoTimeoutSet", "msg": "No timeout was set on this escrow" },
     { "code": 6006, "name": "TimeoutNotReached", "msg": "The timeout deadline has not been reached yet" }
   ],
-  "metadata": { "address": "AErMH45vvaUGaSngNFmhyDeCXfBUfiduiWuZjAbeTUrG" }
+  "types": [
+    {
+      "name": "EscrowAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "client", "type": "pubkey" },
+          { "name": "freelancer", "type": "pubkey" },
+          { "name": "amount", "type": "u64" },
+          { "name": "created_at", "type": "i64" },
+          { "name": "timeout_at", "type": "i64" },
+          { "name": "work_submitted", "type": "bool" },
+          { "name": "approved", "type": "bool" },
+          { "name": "bump", "type": "u8" }
+        ]
+      }
+    }
+  ]
 }

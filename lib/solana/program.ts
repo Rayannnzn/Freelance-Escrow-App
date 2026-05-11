@@ -4,11 +4,8 @@ import { getConnection } from './connection';
 import type { AnchorWallet } from '@solana/wallet-adapter-react';
 import idl from './idl/freelance_escrow.json';
 
-// ─── Program ID (from env or fallback to IDL metadata) ──────────────────────
-export const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID ||
-    'AErMH45vvaUGaSngNFmhyDeCXfBUfiduiWuZjAbeTUrG'
-);
+// ─── Program ID (read from IDL address field) ───────────────────────────────
+export const PROGRAM_ID = new PublicKey(idl.address);
 
 // ─── PDA Derivation ─────────────────────────────────────────────────────────
 // Seeds: ["escrow", client_pubkey, freelancer_pubkey]
@@ -33,13 +30,13 @@ export function getProgram(wallet: AnchorWallet): Program {
     commitment: 'confirmed',
     preflightCommitment: 'confirmed',
   });
-  return new Program(idl as unknown as Idl, provider);
+  return new Program(idl as Idl, provider);
 }
 
 // ─── Read-only provider (no wallet needed) ──────────────────────────────────
 export function getReadOnlyProgram(): Program {
   const connection = getConnection();
-  // Use a dummy wallet that will never sign — only for fetching accounts
+  // Dummy wallet for fetching accounts without signing
   const dummyWallet = {
     publicKey: PublicKey.default,
     signTransaction: () => Promise.reject(new Error('Read-only')),
@@ -49,5 +46,5 @@ export function getReadOnlyProgram(): Program {
   const provider = new AnchorProvider(connection, dummyWallet, {
     commitment: 'confirmed',
   });
-  return new Program(idl as unknown as Idl, provider);
+  return new Program(idl as Idl, provider);
 }
