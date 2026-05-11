@@ -5,7 +5,11 @@ import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
 import { WalletCard } from '@/components/dashboard/WalletCard';
 import { EscrowCard } from '@/components/escrow/EscrowCard';
-import { MOCK_STATS, MOCK_TRANSACTIONS, MOCK_WALLET, MOCK_ESCROWS } from '@/constants/mock-data';
+import { ConnectWalletPrompt } from '@/components/web3/ConnectWalletPrompt';
+import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
+import { useAllWalletEscrows } from '@/hooks/useEscrows';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { MOCK_TRANSACTIONS } from '@/constants/mock-data';
 import {
   Wallet,
   TrendingUp,
@@ -14,7 +18,16 @@ import {
 } from 'lucide-react';
 
 export default function DashboardPage() {
-  const activeEscrows = MOCK_ESCROWS.filter((e) => e.status === 'active' || e.status === 'pending');
+  const { connected } = useWallet();
+  const { data: escrows, isLoading } = useAllWalletEscrows();
+
+  if (!connected) {
+    return <ConnectWalletPrompt />;
+  }
+
+  const activeEscrows = escrows.filter((e) => e.status === 'initialized' || e.status === 'submitted');
+  const completedEscrows = escrows.filter((e) => e.status === 'completed');
+  const totalVolume = escrows.reduce((sum, e) => sum + e.amountSol, 0);
 
   return (
     <div className="space-y-6">
@@ -22,38 +35,34 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Active Escrows"
-          value={MOCK_STATS.activeEscrows.toLocaleString()}
+          value={activeEscrows.length.toString()}
           icon={Wallet}
           accent="neon"
-          trend={{ value: 12.4, direction: 'up' }}
         />
         <StatCard
           title="Total Volume (SOL)"
-          value={MOCK_STATS.totalVolumeSol.toLocaleString()}
+          value={totalVolume.toFixed(2)}
           icon={TrendingUp}
           accent="blue"
-          trend={{ value: 8.2, direction: 'up' }}
         />
         <StatCard
-          title="Completed Contracts"
-          value={MOCK_STATS.completedContracts.toLocaleString()}
+          title="Completed"
+          value={completedEscrows.length.toString()}
           icon={CheckSquare}
           accent="purple"
-          trend={{ value: 5.1, direction: 'up' }}
         />
         <StatCard
-          title="Pending Approvals"
-          value={MOCK_STATS.pendingApprovals}
+          title="All Contracts"
+          value={escrows.length.toString()}
           icon={Clock}
           accent="amber"
-          trend={{ value: 2.3, direction: 'down' }}
         />
       </div>
 
       {/* Chart + Wallet */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
         <ActivityChart />
-        <WalletCard wallet={MOCK_WALLET} />
+        <WalletCard />
       </div>
 
       {/* Recent Activity + Active Escrows */}
@@ -68,9 +77,20 @@ export default function DashboardPage() {
             </a>
           </div>
           <div className="space-y-3">
-            {activeEscrows.slice(0, 3).map((escrow) => (
-              <EscrowCard key={escrow.id} escrow={escrow} />
-            ))}
+            {isLoading ? (
+              <div className="space-y-3">
+                <LoadingSkeleton className="h-32 rounded-xl" />
+                <LoadingSkeleton className="h-32 rounded-xl" />
+              </div>
+            ) : activeEscrows.length > 0 ? (
+              activeEscrows.slice(0, 3).map((escrow) => (
+                <EscrowCard key={escrow.pdaAddress} escrow={escrow} />
+              ))
+            ) : (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                No active escrows yet. Create one to get started.
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -1,27 +1,36 @@
 'use client';
 
 import { useState } from 'react';
-import { MOCK_ESCROWS } from '@/constants/mock-data';
 import { EscrowCard } from '@/components/escrow/EscrowCard';
-import { EscrowStatus } from '@/types/escrow.types';
 import { EmptyState } from '@/components/common/EmptyState';
+import { ConnectWalletPrompt } from '@/components/web3/ConnectWalletPrompt';
+import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { useAllWalletEscrows } from '@/hooks/useEscrows';
+import { useWallet } from '@solana/wallet-adapter-react';
+import type { OnChainEscrowStatus } from '@/lib/solana/types';
 
-const FILTER_TABS: { label: string; value: EscrowStatus | 'all' }[] = [
-  { label: 'All',       value: 'all' },
-  { label: 'Active',    value: 'active' },
-  { label: 'Pending',   value: 'pending' },
-  { label: 'Completed', value: 'completed' },
-  { label: 'Disputed',  value: 'disputed' },
+const FILTER_TABS: { label: string; value: OnChainEscrowStatus | 'all' }[] = [
+  { label: 'All',        value: 'all' },
+  { label: 'Active',     value: 'initialized' },
+  { label: 'Submitted',  value: 'submitted' },
+  { label: 'Completed',  value: 'completed' },
+  { label: 'Timeout',    value: 'timeout_claimable' },
 ];
 
 export default function EscrowPage() {
-  const [filter, setFilter] = useState<EscrowStatus | 'all'>('all');
+  const { connected } = useWallet();
+  const { data: escrows, isLoading } = useAllWalletEscrows();
+  const [filter, setFilter] = useState<OnChainEscrowStatus | 'all'>('all');
 
-  const filtered = MOCK_ESCROWS.filter((e) =>
+  if (!connected) {
+    return <ConnectWalletPrompt />;
+  }
+
+  const filtered = escrows.filter((e) =>
     filter === 'all' ? true : e.status === filter
   );
 
@@ -32,7 +41,7 @@ export default function EscrowPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Escrow Contracts</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {MOCK_ESCROWS.length} contracts · {MOCK_ESCROWS.filter((e) => e.status === 'active').length} active
+            {escrows.length} contracts · {escrows.filter((e) => e.status === 'initialized').length} active
           </p>
         </div>
         <Link href="/create-escrow">
@@ -59,24 +68,30 @@ export default function EscrowPage() {
             {tab.label}
             <span className="ml-1.5 label-caps text-[10px]">
               ({tab.value === 'all'
-                ? MOCK_ESCROWS.length
-                : MOCK_ESCROWS.filter((e) => e.status === tab.value).length})
+                ? escrows.length
+                : escrows.filter((e) => e.status === tab.value).length})
             </span>
           </button>
         ))}
       </div>
 
       {/* Grid */}
-      {filtered.length > 0 ? (
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <LoadingSkeleton key={i} className="h-48 rounded-2xl" />
+          ))}
+        </div>
+      ) : filtered.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((escrow) => (
-            <EscrowCard key={escrow.id} escrow={escrow} />
+            <EscrowCard key={escrow.pdaAddress} escrow={escrow} />
           ))}
         </div>
       ) : (
         <EmptyState
           title="No contracts found"
-          description={`No ${filter} escrow contracts. Create your first one to get started.`}
+          description={`No ${filter === 'all' ? '' : filter} escrow contracts. Create your first one to get started.`}
           action={
             <Link href="/create-escrow">
               <Button className="bg-[#39ff14] text-[#053900] hover:bg-[#2ae500] font-semibold">

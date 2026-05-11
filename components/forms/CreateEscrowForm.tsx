@@ -1,75 +1,79 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { escrowService } from '@/services/escrow.service';
+import { useInitializeEscrow } from '@/hooks/useEscrowActions';
+import { ConnectWalletPrompt } from '@/components/web3/ConnectWalletPrompt';
+import { isValidPublicKey, daysToUnixTimeout, truncatePubkey } from '@/lib/solana/utils';
+import { getEscrowPDA, PROGRAM_ID } from '@/lib/solana/program';
+import { PublicKey } from '@solana/web3.js';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, Rocket, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Loader2, Rocket, ChevronRight, ChevronLeft, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NeonDot } from '@/components/common/NeonDot';
 
-const STEPS = ['Contract Parameters', 'Milestone Setup', 'Review & Deploy'];
-
-interface MilestoneField {
-  title: string;
-  description: string;
-  amount: string;
-  dueDate: string;
-}
+const STEPS = ['Contract Parameters', 'Review & Deploy'];
 
 export function CreateEscrowForm() {
   const router = useRouter();
+  const { publicKey, connected } = useWallet();
+  const initializeEscrow = useInitializeEscrow();
   const [step, setStep] = useState(0);
-  const [loading, setLoading] = useState(false);
 
   const [params, setParams] = useState({
-    title: '',
-    description: '',
     freelancerAddress: '',
     totalAmount: '',
     timeoutDays: '30',
   });
 
-  const [milestones, setMilestones] = useState<MilestoneField[]>([
-    { title: '', description: '', amount: '', dueDate: '' },
-  ]);
+  // Validation
+  const validFreelancer = params.freelancerAddress ? isValidPublicKey(params.freelancerAddress) : false;
+  const validAmount = parseFloat(params.totalAmount) >= 0.01;
+  const validTimeout = parseInt(params.timeoutDays) >= 1;
+  const isStep1Valid = validFreelancer && validAmount && validTimeout;
 
-  const addMilestone = () =>
-    setMilestones((m) => [...m, { title: '', description: '', amount: '', dueDate: '' }]);
+  // PDA preview
+  const pdaPreview = useMemo(() => {
+    if (!publicKey || !validFreelancer) return null;
+    try {
+      const [pda] = getEscrowPDA(publicKey, new PublicKey(params.freelancerAddress));
+      return pda.toBase58();
+    } catch {
+      return null;
+    }
+  }, [publicKey, params.freelancerAddress, validFreelancer]);
 
-  const removeMilestone = (idx: number) =>
-    setMilestones((m) => m.filter((_, i) => i !== idx));
+  const handleDeploy = async () => {
+    if (!isStep1Valid || !publicKey) return;
 
-  const updateMilestone = (idx: number, field: keyof MilestoneField, value: string) => {
-    setMilestones((m) =>
-      m.map((ms, i) => (i === idx ? { ...ms, [field]: value } : ms))
+    const amountSol = parseFloat(params.totalAmount);
+    const timeoutAt = daysToUnixTimeout(parseInt(params.timeoutDays));
+
+    initializeEscrow.mutate(
+      {
+        freelancerAddress: params.freelancerAddress,
+        amountSol,
+        timeoutAt,
+      },
+      {
+        onSuccess: (data) => {
+          router.push(`/escrow/${data.pdaAddress}`);
+        },
+      }
     );
   };
 
-  const handleDeploy = async () => {
-    setLoading(true);
-    try {
-      const result = await escrowService.create({
-        ...params,
-        milestones,
-      });
-      toast.success('Escrow deployed!', {
-        description: `PDA: ${result.pdaAddress.slice(0, 16)}...`,
-      });
-      router.push(`/escrow/${result.id}`);
-    } catch {
-      toast.error('Deployment failed', { description: 'Please try again.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const totalMilestoneAmount = milestones
-    .reduce((acc, m) => acc + (parseFloat(m.amount) || 0), 0)
-    .toFixed(2);
+  if (!connected) {
+    return (
+      <ConnectWalletPrompt
+        title="Connect Wallet to Create Escrow"
+        description="You need a connected Solana wallet to create and fund an escrow contract."
+      />
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -110,34 +114,11 @@ export function CreateEscrowForm() {
               <div>
                 <h2 className="text-lg font-semibold text-foreground mb-1">Escrow Parameters</h2>
                 <p className="text-sm text-muted-foreground">
-                  Set up your secure freelance contract on the Solana network.
+                  Configure your escrow contract to deploy on Solana Devnet.
                 </p>
               </div>
 
               <div className="space-y-4">
-                <div>
-                  <label className="label-caps block mb-1.5" htmlFor="title">Contract Title</label>
-                  <Input
-                    id="title"
-                    value={params.title}
-                    onChange={(e) => setParams({ ...params, title: e.target.value })}
-                    placeholder="e.g. Solana NFT Marketplace UI Kit"
-                    className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
-                  />
-                </div>
-
-                <div>
-                  <label className="label-caps block mb-1.5" htmlFor="description">Description</label>
-                  <Textarea
-                    id="description"
-                    value={params.description}
-                    onChange={(e) => setParams({ ...params, description: e.target.value })}
-                    placeholder="Describe the work scope and deliverables..."
-                    rows={3}
-                    className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)] resize-none"
-                  />
-                </div>
-
                 <div>
                   <label className="label-caps block mb-1.5" htmlFor="freelancerAddress">
                     Freelancer Wallet Address
@@ -146,15 +127,23 @@ export function CreateEscrowForm() {
                     id="freelancerAddress"
                     value={params.freelancerAddress}
                     onChange={(e) => setParams({ ...params, freelancerAddress: e.target.value })}
-                    placeholder="e.g. 7xAbCdEf..."
-                    className="font-mono bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
+                    placeholder="Enter Solana address (e.g. 7xAbCd...)"
+                    className={cn(
+                      'font-mono bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]',
+                      params.freelancerAddress && !validFreelancer && 'border-[rgba(255,74,107,0.5)]'
+                    )}
                   />
+                  {params.freelancerAddress && !validFreelancer && (
+                    <p className="text-xs text-[#ff4a6b] mt-1 flex items-center gap-1">
+                      <AlertCircle className="size-3" /> Invalid Solana address
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label-caps block mb-1.5" htmlFor="totalAmount">
-                      Total Amount (SOL)
+                      Amount (SOL)
                     </label>
                     <Input
                       id="totalAmount"
@@ -162,10 +151,13 @@ export function CreateEscrowForm() {
                       value={params.totalAmount}
                       onChange={(e) => setParams({ ...params, totalAmount: e.target.value })}
                       placeholder="0.00"
-                      min="0"
-                      step="0.1"
+                      min="0.01"
+                      step="0.01"
                       className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
                     />
+                    {params.totalAmount && !validAmount && (
+                      <p className="text-xs text-[#ff4a6b] mt-1">Min 0.01 SOL</p>
+                    )}
                   </div>
                   <div>
                     <label className="label-caps block mb-1.5" htmlFor="timeoutDays">
@@ -188,75 +180,6 @@ export function CreateEscrowForm() {
 
           {step === 1 && (
             <div className="space-y-5 animate-fade-up">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground mb-1">Milestone Setup</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Break down the work into trackable milestones.
-                  </p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={addMilestone}
-                  className="border-[rgba(57,255,20,0.3)] text-[#39ff14] hover:bg-[rgba(57,255,20,0.08)]"
-                >
-                  <Plus data-icon="inline-start" className="size-3.5" />
-                  Add Milestone
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                {milestones.map((ms, idx) => (
-                  <div key={idx} className="glass rounded-2xl p-4 border border-white/[0.06] space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="label-caps">Milestone {idx + 1}</span>
-                      {milestones.length > 1 && (
-                        <button
-                          onClick={() => removeMilestone(idx)}
-                          className="text-muted-foreground hover:text-[#ff4a6b] transition-colors"
-                          aria-label="Remove milestone"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      )}
-                    </div>
-
-                    <Input
-                      value={ms.title}
-                      onChange={(e) => updateMilestone(idx, 'title', e.target.value)}
-                      placeholder="Milestone title"
-                      className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
-                    />
-                    <Input
-                      value={ms.description}
-                      onChange={(e) => updateMilestone(idx, 'description', e.target.value)}
-                      placeholder="Description of deliverables"
-                      className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
-                    />
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        type="number"
-                        value={ms.amount}
-                        onChange={(e) => updateMilestone(idx, 'amount', e.target.value)}
-                        placeholder="Amount (SOL)"
-                        className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
-                      />
-                      <Input
-                        type="date"
-                        value={ms.dueDate}
-                        onChange={(e) => updateMilestone(idx, 'dueDate', e.target.value)}
-                        className="bg-white/[0.04] border-white/[0.08] focus:border-[rgba(57,255,20,0.4)]"
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-5 animate-fade-up">
               <div>
                 <h2 className="text-lg font-semibold text-foreground mb-1">Review & Deploy</h2>
                 <p className="text-sm text-muted-foreground">
@@ -267,45 +190,36 @@ export function CreateEscrowForm() {
               <div className="glass rounded-2xl p-5 space-y-4 border border-[rgba(57,255,20,0.15)]">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <div className="label-caps mb-1">Contract Title</div>
-                    <div className="text-sm font-medium text-foreground">{params.title || '—'}</div>
-                  </div>
-                  <div>
-                    <div className="label-caps mb-1">Total Amount</div>
+                    <div className="label-caps mb-1">Amount</div>
                     <div className="text-sm font-bold text-[#39ff14]">{params.totalAmount || '0'} SOL</div>
-                  </div>
-                  <div>
-                    <div className="label-caps mb-1">Freelancer</div>
-                    <div className="hash-display text-xs">{params.freelancerAddress || '—'}</div>
                   </div>
                   <div>
                     <div className="label-caps mb-1">Timeout</div>
                     <div className="text-sm font-medium text-foreground">{params.timeoutDays} days</div>
                   </div>
-                </div>
-
-                <div className="border-t border-white/[0.04] pt-4">
-                  <div className="label-caps mb-2">Milestones ({milestones.length})</div>
-                  <div className="space-y-1.5">
-                    {milestones.map((ms, i) => (
-                      <div key={i} className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">{ms.title || `Milestone ${i + 1}`}</span>
-                        <span className="font-medium text-foreground">{ms.amount || '0'} SOL</span>
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between text-xs font-bold border-t border-white/[0.04] pt-1.5 mt-1.5">
-                      <span className="text-foreground">Total</span>
-                      <span className="text-[#39ff14]">{totalMilestoneAmount} SOL</span>
-                    </div>
+                  <div className="col-span-2">
+                    <div className="label-caps mb-1">Freelancer</div>
+                    <div className="hash-display text-xs break-all">{params.freelancerAddress}</div>
                   </div>
+                  <div className="col-span-2">
+                    <div className="label-caps mb-1">Client (You)</div>
+                    <div className="hash-display text-xs break-all">{publicKey?.toBase58()}</div>
+                  </div>
+                  {pdaPreview && (
+                    <div className="col-span-2 pt-2 border-t border-white/[0.04]">
+                      <div className="label-caps mb-1 text-[#39ff14]">Escrow PDA (Vault)</div>
+                      <div className="hash-display text-xs break-all">{pdaPreview}</div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               <div className="glass rounded-xl p-4 border border-[rgba(255,177,74,0.2)]">
                 <div className="text-xs text-[#ffb14a] font-medium mb-1">⚡ Devnet Transaction</div>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Funds will be locked in a Program Derived Address (PDA) until the freelancer
-                  completes the milestone or the timeout period is reached.
+                  This will send <strong className="text-foreground">{params.totalAmount} SOL</strong> from your wallet
+                  to a Program Derived Address. Funds will be locked until the freelancer
+                  submits work and you approve it, or until the timeout period is reached.
                 </p>
               </div>
             </div>
@@ -326,6 +240,7 @@ export function CreateEscrowForm() {
             {step < STEPS.length - 1 ? (
               <Button
                 onClick={() => setStep((s) => s + 1)}
+                disabled={!isStep1Valid}
                 className="bg-[#39ff14] text-[#053900] hover:bg-[#2ae500] hover:shadow-[0_0_20px_rgba(57,255,20,0.4)] font-semibold"
               >
                 Continue
@@ -334,10 +249,10 @@ export function CreateEscrowForm() {
             ) : (
               <Button
                 onClick={handleDeploy}
-                disabled={loading}
+                disabled={initializeEscrow.isPending || !isStep1Valid}
                 className="bg-[#39ff14] text-[#053900] hover:bg-[#2ae500] hover:shadow-[0_0_20px_rgba(57,255,20,0.4)] font-semibold min-w-[160px]"
               >
-                {loading ? (
+                {initializeEscrow.isPending ? (
                   <>
                     <Loader2 data-icon="inline-start" className="size-4 animate-spin" />
                     Deploying...
@@ -359,20 +274,19 @@ export function CreateEscrowForm() {
             <h3 className="text-sm font-semibold text-foreground mb-4">Contract Architecture</h3>
 
             <div className="space-y-3">
-              {/* Node visualization */}
               <div className="flex flex-col items-center gap-2">
                 <div className="glass rounded-xl p-3 w-full text-center border border-white/[0.08]">
                   <div className="label-caps text-[10px] mb-1">Program</div>
-                  <div className="hash-display text-[11px]">KnE...72pA...sL1x</div>
+                  <div className="hash-display text-[11px]">{truncatePubkey(PROGRAM_ID.toBase58(), 6)}</div>
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <div className="h-6 w-px bg-[rgba(57,255,20,0.3)]" />
-                </div>
+                <div className="h-6 w-px bg-[rgba(57,255,20,0.3)]" />
 
                 <div className="glass rounded-xl p-3 w-full text-center border border-[rgba(57,255,20,0.3)] shadow-[0_0_12px_rgba(57,255,20,0.1)]">
                   <div className="label-caps text-[10px] mb-1 text-[#39ff14]">PDA Vault</div>
-                  <div className="text-xs text-muted-foreground">Derived from seeds: ['escrow', seed_v1]</div>
+                  <div className="text-xs text-muted-foreground">
+                    {pdaPreview ? truncatePubkey(pdaPreview, 6) : 'Enter freelancer address...'}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-8">
@@ -384,15 +298,13 @@ export function CreateEscrowForm() {
                   <div className="glass rounded-xl p-3 text-center border border-white/[0.06]">
                     <div className="label-caps text-[10px] mb-1">Client</div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {params.freelancerAddress ? 'You' : '...'}
+                      {publicKey ? truncatePubkey(publicKey.toBase58(), 4) : 'You'}
                     </div>
                   </div>
                   <div className="glass rounded-xl p-3 text-center border border-white/[0.06]">
                     <div className="label-caps text-[10px] mb-1">Freelancer</div>
                     <div className="hash-display text-[10px] truncate">
-                      {params.freelancerAddress
-                        ? params.freelancerAddress.slice(0, 8) + '...'
-                        : 'Pending'}
+                      {validFreelancer ? truncatePubkey(params.freelancerAddress, 4) : 'Pending'}
                     </div>
                   </div>
                 </div>
@@ -400,18 +312,17 @@ export function CreateEscrowForm() {
             </div>
           </div>
 
-          {/* Stats preview */}
           <div className="cyber-card p-5 space-y-3">
             <h3 className="text-sm font-semibold text-foreground">Network Health</h3>
             <div className="flex items-center gap-2">
               <NeonDot />
-              <span className="text-sm font-bold text-foreground">3,482 TPS</span>
-              <span className="label-caps text-[10px] text-[#39ff14]">Healthy</span>
+              <span className="text-sm font-bold text-foreground">Devnet</span>
+              <span className="label-caps text-[10px] text-[#39ff14]">Connected</span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="glass rounded-lg p-2.5">
                 <div className="label-caps text-[10px] mb-0.5">Auto-Refund</div>
-                <div className="text-xs font-medium text-foreground">Enabled</div>
+                <div className="text-xs font-medium text-foreground">Timeout</div>
               </div>
               <div className="glass rounded-lg p-2.5">
                 <div className="label-caps text-[10px] mb-0.5">Network</div>

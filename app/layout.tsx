@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { SolanaProvider } from '@/providers/SolanaProvider';
 
 const geistSans = Geist({
   variable: '--font-sans',
@@ -32,19 +33,21 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
       <body className="min-h-full flex flex-col">
-        <TooltipProvider>
-          {children}
-          <Toaster
-            theme="dark"
-            toastOptions={{
-              style: {
-                background: 'rgba(31, 32, 34, 0.95)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: '#e3e2e5',
-              },
-            }}
-          />
-        </TooltipProvider>
+        <SolanaProvider>
+          <TooltipProvider>
+            {children}
+            <Toaster
+              theme="dark"
+              toastOptions={{
+                style: {
+                  background: 'rgba(31, 32, 34, 0.95)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  color: '#e3e2e5',
+                },
+              }}
+            />
+          </TooltipProvider>
+        </SolanaProvider>
       </body>
     </html>
   );

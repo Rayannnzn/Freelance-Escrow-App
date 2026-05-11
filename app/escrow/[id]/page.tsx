@@ -1,17 +1,19 @@
 'use client';
 
 import { use } from 'react';
-import { notFound } from 'next/navigation';
-import { MOCK_ESCROWS } from '@/constants/mock-data';
+import { useEscrowDetail } from '@/hooks/useEscrowDetail';
+import { useSubmitWork, useApproveWork, useClaimTimeout } from '@/hooks/useEscrowActions';
+import { useWallet } from '@solana/wallet-adapter-react';
 import { EscrowProgress } from '@/components/escrow/EscrowProgress';
-import { MilestoneList } from '@/components/escrow/MilestoneList';
 import { CountdownTimer } from '@/components/escrow/CountdownTimer';
-import { PDADetails } from '@/components/escrow/PDADetails';
-import { StatusBadge } from '@/components/common/StatusBadge';
-import { AddressDisplay } from '@/components/common/AddressDisplay';
+import { ConnectWalletPrompt } from '@/components/web3/ConnectWalletPrompt';
+import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatSol, formatUsd } from '@/lib/format';
+import { truncatePubkey } from '@/lib/solana/utils';
+import { getExplorerAddressUrl } from '@/lib/solana/explorer';
+import { PROGRAM_ID } from '@/lib/solana/program';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -19,41 +21,102 @@ import {
   Shield,
   User,
   ExternalLink,
+  Loader2,
+  Copy,
+  Lock,
+  Send,
+  Clock,
 } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
 
 interface EscrowDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
 export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
-  const { id } = use(params);
-  const escrow = MOCK_ESCROWS.find((e) => e.id === id);
+  const { id: pdaAddress } = use(params);
+  const { publicKey, connected } = useWallet();
+  const { data: escrow, isLoading, error } = useEscrowDetail(pdaAddress);
 
-  if (!escrow) notFound();
+  const submitWork = useSubmitWork();
+  const approveWork = useApproveWork();
+  const claimTimeout = useClaimTimeout();
 
-  // Determine current lifecycle step
-  const hasSubmitted = escrow.milestones.some((m) => ['submitted', 'approved', 'released'].includes(m.status));
-  const hasApproved = escrow.milestones.some((m) => m.status === 'approved');
-  const allReleased = escrow.milestones.every((m) => m.status === 'released');
+  if (!connected) return <ConnectWalletPrompt />;
 
-  const currentStep = allReleased
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <LoadingSkeleton className="h-8 w-48 rounded" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <LoadingSkeleton className="h-32 rounded-2xl" />
+          <LoadingSkeleton className="h-32 rounded-2xl" />
+          <LoadingSkeleton className="h-32 rounded-2xl" />
+        </div>
+        <LoadingSkeleton className="h-24 rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (!escrow) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <div className="cyber-card p-10 max-w-md text-center space-y-4">
+          <AlertTriangle className="size-12 text-[#ff4a6b] mx-auto" />
+          <h2 className="text-xl font-bold text-foreground">Escrow Not Found</h2>
+          <p className="text-sm text-muted-foreground">
+            This PDA address doesn&apos;t contain a valid escrow account.
+          </p>
+          <Link href="/escrow">
+            <Button variant="outline" className="border-white/[0.12]">
+              <ArrowLeft data-icon="inline-start" className="size-3.5" />
+              Back to Escrows
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const walletAddress = publicKey?.toBase58() || '';
+  const isClient = walletAddress === escrow.client;
+  const isFreelancer = walletAddress === escrow.freelancer;
+
+  // Determine lifecycle step for progress bar
+  const currentStep = escrow.approved
     ? 'released'
-    : hasApproved
-    ? 'approved'
-    : hasSubmitted
+    : escrow.workSubmitted
     ? 'submitted'
     : 'initialized';
 
-  const handleApprove = async (milestoneId: string) => {
-    toast.success('Milestone approved', { description: 'Funds will be released shortly.' });
+  const handleSubmitWork = () => {
+    submitWork.mutate({
+      clientAddress: escrow.client,
+      pdaAddress: escrow.pdaAddress,
+    });
   };
 
-  const handleDispute = () => {
-    toast.error('Dispute raised', { description: 'An arbitrator will review your case.' });
+  const handleApproveWork = () => {
+    approveWork.mutate({
+      freelancerAddress: escrow.freelancer,
+      pdaAddress: escrow.pdaAddress,
+    });
   };
+
+  const handleClaimTimeout = () => {
+    claimTimeout.mutate({
+      clientAddress: escrow.client,
+      pdaAddress: escrow.pdaAddress,
+    });
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    await navigator.clipboard.writeText(text);
+    toast.success(`${label} copied`);
+  };
+
+  const isMutating = submitWork.isPending || approveWork.isPending || claimTimeout.isPending;
 
   return (
     <div className="space-y-6">
@@ -64,20 +127,37 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4 w-fit"
         >
           <ArrowLeft className="size-3.5" />
-          Back to Escrow
+          Back to Escrows
         </Link>
 
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
-              <h1 className="text-2xl font-bold text-foreground">{escrow.title}</h1>
-              <StatusBadge status={escrow.status} />
+              <h1 className="text-2xl font-bold text-foreground">Escrow Contract</h1>
+              <span
+                className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold"
+                style={{
+                  color: escrow.status === 'completed' ? '#79ff5b'
+                    : escrow.status === 'submitted' ? '#ffb14a'
+                    : escrow.status === 'timeout_claimable' ? '#ff4a6b'
+                    : '#39ff14',
+                  backgroundColor: escrow.status === 'completed' ? 'rgba(121,255,91,0.12)'
+                    : escrow.status === 'submitted' ? 'rgba(255,177,74,0.12)'
+                    : escrow.status === 'timeout_claimable' ? 'rgba(255,74,107,0.12)'
+                    : 'rgba(57,255,20,0.12)',
+                }}
+              >
+                {escrow.status === 'initialized' ? 'Active'
+                  : escrow.status === 'submitted' ? 'Work Submitted'
+                  : escrow.status === 'completed' ? 'Completed'
+                  : 'Timeout Claimable'}
+              </span>
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              <span className="label-caps">{escrow.contractId}</span>
+              <span className="label-caps">{truncatePubkey(escrow.pdaAddress, 6)}</span>
               <span>·</span>
               <a
-                href={`https://explorer.solana.com/address/${escrow.pdaAddress}?cluster=devnet`}
+                href={getExplorerAddressUrl(escrow.pdaAddress)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1 hover:text-[#00eefc] transition-colors"
@@ -87,17 +167,17 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
             </div>
           </div>
 
+          {/* Role badge */}
           <div className="flex items-center gap-2">
-            {escrow.status !== 'completed' && escrow.status !== 'disputed' && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDispute}
-                className="border-[rgba(255,74,107,0.3)] text-[#ff4a6b] hover:bg-[rgba(255,74,107,0.08)]"
-              >
-                <AlertTriangle data-icon="inline-start" className="size-3.5" />
-                Raise Dispute
-              </Button>
+            {isClient && (
+              <span className="px-3 py-1 rounded-lg text-xs font-semibold bg-[rgba(0,238,252,0.12)] text-[#00eefc] border border-[rgba(0,238,252,0.2)]">
+                You are the Client
+              </span>
+            )}
+            {isFreelancer && (
+              <span className="px-3 py-1 rounded-lg text-xs font-semibold bg-[rgba(57,255,20,0.12)] text-[#39ff14] border border-[rgba(57,255,20,0.2)]">
+                You are the Freelancer
+              </span>
             )}
           </div>
         </div>
@@ -109,15 +189,15 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
         <div className="cyber-card p-5 cyber-card-active">
           <div className="label-caps mb-2">Amount Locked</div>
           <div className="text-3xl font-bold text-foreground mb-1">
-            {formatSol(escrow.lockedAmount)}
+            {formatSol(escrow.amountSol)}
           </div>
-          <div className="text-sm text-muted-foreground">≈ {formatUsd(escrow.lockedAmount)}</div>
+          <div className="text-sm text-muted-foreground">≈ {formatUsd(escrow.amountSol)}</div>
         </div>
 
         {/* Timeout Countdown */}
         <div className="cyber-card p-5">
           <div className="label-caps mb-3">Timeout Countdown</div>
-          <CountdownTimer targetDate={escrow.timeoutDate} />
+          <CountdownTimer targetDate={escrow.timeoutAt.toISOString()} />
         </div>
 
         {/* Parties */}
@@ -129,8 +209,10 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
               <User className="size-4 text-[#00eefc]" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-foreground">{escrow.client.displayName}</div>
-              <AddressDisplay address={escrow.client.address} chars={4} />
+              <div className="text-xs font-semibold text-foreground">
+                {isClient ? 'You (Client)' : 'Client'}
+              </div>
+              <div className="hash-display text-[10px]">{truncatePubkey(escrow.client, 4)}</div>
             </div>
             <span className="label-caps text-[10px] text-[#00eefc]">Client</span>
           </div>
@@ -142,8 +224,10 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
               <User className="size-4 text-[#39ff14]" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-foreground">{escrow.freelancer.displayName}</div>
-              <AddressDisplay address={escrow.freelancer.address} chars={4} />
+              <div className="text-xs font-semibold text-foreground">
+                {isFreelancer ? 'You (Freelancer)' : 'Freelancer'}
+              </div>
+              <div className="hash-display text-[10px]">{truncatePubkey(escrow.freelancer, 4)}</div>
             </div>
             <span className="label-caps text-[10px] text-[#39ff14]">Freelancer</span>
           </div>
@@ -154,115 +238,220 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
       <div className="cyber-card p-6">
         <h2 className="text-sm font-semibold text-foreground mb-6">Escrow Progress Lifecycle</h2>
         <EscrowProgress
-          currentStep={currentStep}
+          currentStep={currentStep as 'initialized' | 'submitted' | 'approved' | 'released'}
           dates={{
-            initialized: escrow.createdAt,
-            submitted: escrow.milestones.find((m) =>
-              ['submitted', 'approved', 'released'].includes(m.status)
-            )?.submittedAt,
+            initialized: escrow.createdAt.toISOString(),
           }}
         />
       </div>
 
       {/* Main Tabs */}
-      <Tabs defaultValue="milestones" className="space-y-4">
+      <Tabs defaultValue="controls" className="space-y-4">
         <TabsList className="glass rounded-xl p-1 h-auto gap-1">
           <TabsTrigger
-            value="milestones"
+            value="controls"
             className="data-[state=active]:bg-[rgba(57,255,20,0.1)] data-[state=active]:text-[#39ff14] rounded-lg"
           >
-            Milestones
+            Contract Actions
           </TabsTrigger>
           <TabsTrigger
             value="pda"
             className="data-[state=active]:bg-[rgba(57,255,20,0.1)] data-[state=active]:text-[#39ff14] rounded-lg"
           >
-            PDA & Audit Log
-          </TabsTrigger>
-          <TabsTrigger
-            value="controls"
-            className="data-[state=active]:bg-[rgba(57,255,20,0.1)] data-[state=active]:text-[#39ff14] rounded-lg"
-          >
-            Contract Controls
+            PDA Details
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="milestones" className="space-y-4">
-          <MilestoneList
-            milestones={escrow.milestones}
-            onApprove={handleApprove}
-            isClient
-          />
-        </TabsContent>
-
-        <TabsContent value="pda">
-          <PDADetails
-            pdaAddress={escrow.pdaAddress}
-            programId={escrow.programId}
-            auditLog={escrow.auditLog}
-          />
-        </TabsContent>
-
         <TabsContent value="controls">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Control Actions */}
+            {/* Actions */}
             <div className="cyber-card p-6 space-y-4">
               <div className="flex items-center gap-2 mb-2">
                 <Shield className="size-4 text-[#39ff14]" />
-                <h3 className="text-sm font-semibold text-foreground">Contract Controls</h3>
+                <h3 className="text-sm font-semibold text-foreground">Contract Actions</h3>
               </div>
 
               <div className="space-y-3">
-                <Button
-                  className="w-full bg-[#39ff14] text-[#053900] hover:bg-[#2ae500] hover:shadow-[0_0_20px_rgba(57,255,20,0.4)] font-semibold"
-                  disabled={escrow.status === 'completed'}
-                >
-                  <CheckCircle2 data-icon="inline-start" className="size-4" />
-                  Approve & Release Funds
-                </Button>
+                {/* Submit Work — freelancer only, when not yet submitted */}
+                {isFreelancer && !escrow.workSubmitted && (
+                  <Button
+                    className="w-full bg-[#39ff14] text-[#053900] hover:bg-[#2ae500] hover:shadow-[0_0_20px_rgba(57,255,20,0.4)] font-semibold"
+                    onClick={handleSubmitWork}
+                    disabled={isMutating}
+                  >
+                    {submitWork.isPending ? (
+                      <><Loader2 data-icon="inline-start" className="size-4 animate-spin" /> Submitting...</>
+                    ) : (
+                      <><Send data-icon="inline-start" className="size-4" /> Submit Work</>
+                    )}
+                  </Button>
+                )}
 
-                <Button
-                  variant="outline"
-                  className="w-full border-[rgba(0,238,252,0.3)] text-[#00eefc] hover:bg-[rgba(0,238,252,0.08)]"
-                >
-                  Request Work Submission
-                </Button>
+                {/* Approve — client only, when work is submitted */}
+                {isClient && escrow.workSubmitted && !escrow.approved && (
+                  <Button
+                    className="w-full bg-[#39ff14] text-[#053900] hover:bg-[#2ae500] hover:shadow-[0_0_20px_rgba(57,255,20,0.4)] font-semibold"
+                    onClick={handleApproveWork}
+                    disabled={isMutating}
+                  >
+                    {approveWork.isPending ? (
+                      <><Loader2 data-icon="inline-start" className="size-4 animate-spin" /> Approving...</>
+                    ) : (
+                      <><CheckCircle2 data-icon="inline-start" className="size-4" /> Approve &amp; Release Funds</>
+                    )}
+                  </Button>
+                )}
 
-                <Button
-                  variant="outline"
-                  className="w-full border-[rgba(255,74,107,0.3)] text-[#ff4a6b] hover:bg-[rgba(255,74,107,0.08)]"
-                  onClick={handleDispute}
-                  disabled={escrow.status === 'disputed'}
-                >
-                  <AlertTriangle data-icon="inline-start" className="size-4" />
-                  Raise Dispute
-                </Button>
+                {/* Claim Timeout — freelancer, when timeout reached */}
+                {isFreelancer && escrow.status === 'timeout_claimable' && !escrow.approved && (
+                  <Button
+                    variant="outline"
+                    className="w-full border-[rgba(255,74,107,0.3)] text-[#ff4a6b] hover:bg-[rgba(255,74,107,0.08)]"
+                    onClick={handleClaimTimeout}
+                    disabled={isMutating}
+                  >
+                    {claimTimeout.isPending ? (
+                      <><Loader2 data-icon="inline-start" className="size-4 animate-spin" /> Claiming...</>
+                    ) : (
+                      <><Clock data-icon="inline-start" className="size-4" /> Claim Timeout Refund</>
+                    )}
+                  </Button>
+                )}
+
+                {/* Status messages */}
+                {escrow.approved && (
+                  <div className="glass rounded-xl p-4 border border-[rgba(121,255,91,0.2)]">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="size-4 text-[#79ff5b]" />
+                      <span className="text-sm font-medium text-[#79ff5b]">Contract Complete</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Funds have been released to the freelancer.
+                    </p>
+                  </div>
+                )}
+
+                {isClient && escrow.status === 'initialized' && (
+                  <div className="glass rounded-xl p-4 border border-white/[0.06]">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="size-3.5 text-[#ffb14a] animate-spin" />
+                      <span className="text-xs text-muted-foreground">
+                        Waiting for the freelancer to submit work.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {isFreelancer && escrow.workSubmitted && !escrow.approved && (
+                  <div className="glass rounded-xl p-4 border border-[rgba(255,177,74,0.2)]">
+                    <div className="flex items-center gap-2">
+                      <Clock className="size-3.5 text-[#ffb14a]" />
+                      <span className="text-xs text-muted-foreground">
+                        Work submitted. Waiting for client approval.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {!isClient && !isFreelancer && (
+                  <div className="glass rounded-xl p-4 border border-white/[0.06]">
+                    <p className="text-xs text-muted-foreground text-center">
+                      You are not a participant in this escrow.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Support */}
+            {/* Info panel */}
             <div className="cyber-card p-6 border-[rgba(153,69,255,0.2)]">
               <h3 className="text-sm font-semibold text-foreground mb-2">
-                Need help with this contract?
+                How this escrow works
               </h3>
               <p className="text-xs text-muted-foreground leading-relaxed mb-4">
-                Our specialized arbitrators are ready to review your proof of work.
+                Funds are locked in a Program Derived Address (PDA). The freelancer submits
+                work, the client approves, and SOL is automatically released. If the timeout
+                is reached without approval, the client can claim their funds back.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-[rgba(153,69,255,0.3)] text-[#9945ff] hover:bg-[rgba(153,69,255,0.08)]"
-              >
-                Contact Arbitrator
-              </Button>
 
               <div className="mt-4 pt-4 border-t border-white/[0.04]">
                 <div className="flex items-start gap-2">
                   <Shield className="size-3.5 text-[#39ff14] mt-0.5 shrink-0" />
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    End-to-End Escrow Encryption — Your funds and intellectual property are
-                    protected by multi-signature validation and automated timeout resolution.
+                    Secured by the Solana blockchain — all transactions are verifiable on-chain.
                   </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="pda">
+          <div className="space-y-4">
+            {/* PDA Details Card */}
+            <div className="glass rounded-2xl p-5 border border-[rgba(57,255,20,0.15)]">
+              <div className="flex items-center gap-2 mb-4">
+                <Shield className="size-4 text-[#39ff14]" />
+                <h3 className="text-sm font-semibold text-foreground">On-Chain Account Data</h3>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <div className="label-caps mb-1">PDA Address</div>
+                  <div className="flex items-center gap-2">
+                    <span className="hash-display flex-1 truncate text-xs">{escrow.pdaAddress}</span>
+                    <button
+                      onClick={() => copyToClipboard(escrow.pdaAddress, 'PDA address')}
+                      className="text-muted-foreground hover:text-[#39ff14] transition-colors"
+                    >
+                      <Copy className="size-3" />
+                    </button>
+                    <a
+                      href={getExplorerAddressUrl(escrow.pdaAddress)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted-foreground hover:text-[#00eefc] transition-colors"
+                    >
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="label-caps mb-1">Program ID</div>
+                  <span className="hash-display text-xs">{PROGRAM_ID.toBase58()}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/[0.04]">
+                  <div>
+                    <div className="label-caps mb-1">Amount (Lamports)</div>
+                    <span className="text-xs text-foreground font-mono">
+                      {(escrow.amountSol * 1e9).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="label-caps mb-1">Bump Seed</div>
+                    <span className="text-xs text-foreground font-mono">{escrow.bump}</span>
+                  </div>
+                  <div>
+                    <div className="label-caps mb-1">Work Submitted</div>
+                    <span className={`text-xs font-medium ${escrow.workSubmitted ? 'text-[#39ff14]' : 'text-muted-foreground'}`}>
+                      {escrow.workSubmitted ? 'Yes' : 'No'}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="label-caps mb-1">Approved</div>
+                    <span className={`text-xs font-medium ${escrow.approved ? 'text-[#39ff14]' : 'text-muted-foreground'}`}>
+                      {escrow.approved ? 'Yes' : 'No'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-white/[0.04]">
+                  <Lock className="size-3 text-[#39ff14]" />
+                  <span className="text-xs text-muted-foreground">
+                    Escrow secured by Solana Anchor on-chain program.
+                  </span>
                 </div>
               </div>
             </div>

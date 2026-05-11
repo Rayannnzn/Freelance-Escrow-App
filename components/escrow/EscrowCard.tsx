@@ -1,37 +1,36 @@
 'use client';
 
-import { Escrow } from '@/types/escrow.types';
-import { StatusBadge } from '@/components/common/StatusBadge';
+import type { EscrowDisplay, OnChainEscrowStatus } from '@/lib/solana/types';
 import { formatSol, formatRelativeTime } from '@/lib/format';
-import { Progress } from '@/components/ui/progress';
-import { Users, Clock, ChevronRight } from 'lucide-react';
+import { truncatePubkey } from '@/lib/solana/utils';
+import { Users, Clock, ChevronRight, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 
 interface EscrowCardProps {
-  escrow: Escrow;
+  escrow: EscrowDisplay;
   className?: string;
 }
 
-export function EscrowCard({ escrow, className }: EscrowCardProps) {
-  const completedMilestones = escrow.milestones.filter(
-    (m) => m.status === 'released' || m.status === 'approved'
-  ).length;
-  const totalMilestones = escrow.milestones.length;
-  const progressPct = totalMilestones > 0
-    ? Math.round((completedMilestones / totalMilestones) * 100)
-    : 0;
+const STATUS_CONFIG: Record<OnChainEscrowStatus, { label: string; color: string; bgColor: string }> = {
+  initialized: { label: 'Active', color: '#39ff14', bgColor: 'rgba(57,255,20,0.12)' },
+  submitted: { label: 'Submitted', color: '#ffb14a', bgColor: 'rgba(255,177,74,0.12)' },
+  completed: { label: 'Completed', color: '#79ff5b', bgColor: 'rgba(121,255,91,0.12)' },
+  timeout_claimable: { label: 'Timeout', color: '#ff4a6b', bgColor: 'rgba(255,74,107,0.12)' },
+};
 
-  const isActive = escrow.status === 'active';
-  const isDisputed = escrow.status === 'disputed';
+export function EscrowCard({ escrow, className }: EscrowCardProps) {
+  const config = STATUS_CONFIG[escrow.status];
+  const isActive = escrow.status === 'initialized';
+  const isTimeout = escrow.status === 'timeout_claimable';
 
   return (
-    <Link href={`/escrow/${escrow.id}`}>
+    <Link href={`/escrow/${escrow.pdaAddress}`}>
       <div
         className={cn(
           'cyber-card p-5 cursor-pointer group animate-fade-up',
           isActive && 'cyber-card-active',
-          isDisputed && 'border-[rgba(255,74,107,0.3)] hover:border-[rgba(255,74,107,0.5)]',
+          isTimeout && 'border-[rgba(255,74,107,0.3)] hover:border-[rgba(255,74,107,0.5)]',
           className
         )}
       >
@@ -39,48 +38,71 @@ export function EscrowCard({ escrow, className }: EscrowCardProps) {
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-foreground truncate group-hover:text-[#39ff14] transition-colors">
-              {escrow.title}
+              Escrow Contract
             </h3>
-            <div className="label-caps text-[10px] mt-0.5">{escrow.contractId}</div>
+            <div className="label-caps text-[10px] mt-0.5">{truncatePubkey(escrow.pdaAddress, 6)}</div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <StatusBadge status={escrow.status} />
+            <span
+              className="px-2 py-0.5 rounded-md text-[11px] font-semibold"
+              style={{ color: config.color, backgroundColor: config.bgColor }}
+            >
+              {config.label}
+            </span>
             <ChevronRight className="size-3.5 text-muted-foreground group-hover:text-[#39ff14] transition-colors" />
           </div>
         </div>
 
-        {/* Amount */}
+        {/* Amount + Status */}
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-xl font-bold text-foreground">{formatSol(escrow.totalAmount)}</div>
-            <div className="label-caps text-[10px]">Total Locked</div>
+            <div className="text-xl font-bold text-foreground">{formatSol(escrow.amountSol)}</div>
+            <div className="label-caps text-[10px]">Locked Amount</div>
           </div>
           <div className="text-right">
-            <div className="text-sm font-medium text-foreground">
-              {completedMilestones}/{totalMilestones}
-            </div>
-            <div className="label-caps text-[10px]">Milestones</div>
+            {escrow.status === 'initialized' && (
+              <div className="flex items-center gap-1 text-[#39ff14]">
+                <Loader2 className="size-3 animate-spin" />
+                <span className="text-xs font-medium">Awaiting Work</span>
+              </div>
+            )}
+            {escrow.status === 'submitted' && (
+              <div className="flex items-center gap-1 text-[#ffb14a]">
+                <Clock className="size-3" />
+                <span className="text-xs font-medium">Awaiting Approval</span>
+              </div>
+            )}
+            {escrow.status === 'completed' && (
+              <div className="flex items-center gap-1 text-[#79ff5b]">
+                <CheckCircle2 className="size-3" />
+                <span className="text-xs font-medium">Funds Released</span>
+              </div>
+            )}
+            {escrow.status === 'timeout_claimable' && (
+              <div className="flex items-center gap-1 text-[#ff4a6b]">
+                <AlertTriangle className="size-3" />
+                <span className="text-xs font-medium">Claimable</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Progress bar — laser effect */}
+        {/* Progress bar — lifecycle */}
         <div className="mb-3">
           <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{
-                width: `${progressPct}%`,
-                background: isDisputed
+                width: escrow.status === 'completed' ? '100%'
+                  : escrow.status === 'submitted' ? '66%'
+                  : escrow.status === 'timeout_claimable' ? '100%'
+                  : '33%',
+                background: isTimeout
                   ? 'linear-gradient(90deg, #ff4a6b, rgba(255,74,107,0.3))'
-                  : 'linear-gradient(90deg, #39ff14, rgba(57,255,20,0.3))',
-                boxShadow: isDisputed
-                  ? '0 0 6px rgba(255,74,107,0.5)'
-                  : '0 0 6px rgba(57,255,20,0.5)',
+                  : `linear-gradient(90deg, ${config.color}, ${config.color}40)`,
+                boxShadow: `0 0 6px ${config.color}80`,
               }}
             />
-          </div>
-          <div className="flex justify-between mt-1">
-            <span className="label-caps text-[10px]">{progressPct}% complete</span>
           </div>
         </div>
 
@@ -88,13 +110,13 @@ export function EscrowCard({ escrow, className }: EscrowCardProps) {
         <div className="flex items-center justify-between pt-2 border-t border-white/[0.04]">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users className="size-3" />
-            <span className="truncate max-w-[100px]">{escrow.client.displayName}</span>
+            <span className="truncate max-w-[80px]">{truncatePubkey(escrow.client, 4)}</span>
             <span>→</span>
-            <span className="truncate max-w-[100px]">{escrow.freelancer.displayName}</span>
+            <span className="truncate max-w-[80px]">{truncatePubkey(escrow.freelancer, 4)}</span>
           </div>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="size-3" />
-            <span>{formatRelativeTime(escrow.updatedAt)}</span>
+            <span>{formatRelativeTime(escrow.createdAt.toISOString())}</span>
           </div>
         </div>
       </div>

@@ -4,6 +4,9 @@ import { Bell, Search, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NeonDot } from '@/components/common/NeonDot';
+import { WalletButton } from '@/components/web3/WalletButton';
+import { useWalletBalance } from '@/hooks/useWalletBalance';
+import { useWallet } from '@solana/wallet-adapter-react';
 import Link from 'next/link';
 
 interface TopNavProps {
@@ -12,6 +15,9 @@ interface TopNavProps {
 }
 
 export function TopNav({ title = 'Dashboard', subtitle }: TopNavProps) {
+  const { publicKey, connected } = useWallet();
+  const { data: balance, isLoading } = useWalletBalance();
+
   return (
     <header className="sticky top-0 z-30 h-16 flex items-center gap-4 px-6 glass border-b border-white/[0.06]">
       {/* Page Title */}
@@ -54,14 +60,20 @@ export function TopNav({ title = 'Dashboard', subtitle }: TopNavProps) {
         </Button>
       </Link>
 
-      {/* Wallet mini */}
-      <button
-        className="hidden lg:flex items-center gap-2 px-3 py-1.5 glass rounded-xl border border-[rgba(57,255,20,0.2)] hover:border-[rgba(57,255,20,0.4)] transition-colors"
-        aria-label="Wallet status"
-      >
-        <NeonDot />
-        <span className="text-xs font-medium text-[#39ff14]">48.24 SOL</span>
-      </button>
+      {/* Wallet — real balance or connect button */}
+      {connected && publicKey ? (
+        <div className="hidden lg:flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1.5 glass rounded-xl border border-[rgba(57,255,20,0.2)]">
+            <NeonDot />
+            <span className="text-xs font-medium text-[#39ff14]">
+              {isLoading ? '...' : `${(balance ?? 0).toFixed(2)} SOL`}
+            </span>
+          </div>
+          <WalletButton />
+        </div>
+      ) : (
+        <WalletButton />
+      )}
     </header>
   );
 }
