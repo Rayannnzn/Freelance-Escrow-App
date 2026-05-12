@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { useAllWalletEscrows } from '@/hooks/useEscrows';
+import { useEnrichedEscrows } from '@/hooks/useEnrichedEscrows';
 import { useWallet } from '@solana/wallet-adapter-react';
 import type { OnChainEscrowStatus } from '@/lib/solana/types';
 
@@ -23,7 +23,7 @@ const FILTER_TABS: { label: string; value: OnChainEscrowStatus | 'all' }[] = [
 
 export default function EscrowPage() {
   const { connected } = useWallet();
-  const { data: escrows, isLoading } = useAllWalletEscrows();
+  const { data: escrows, isLoading } = useEnrichedEscrows();
   const [filter, setFilter] = useState<OnChainEscrowStatus | 'all'>('all');
 
   if (!connected) {
@@ -85,7 +85,7 @@ export default function EscrowPage() {
       ) : filtered.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((escrow) => (
-            <EscrowCard key={escrow.pdaAddress} escrow={escrow} />
+            <EscrowCard key={escrow.pdaAddress} escrow={escrow} metadata={escrow.metadata} />
           ))}
         </div>
       ) : (

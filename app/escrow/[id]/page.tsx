@@ -3,12 +3,14 @@
 import { use, useState, useCallback } from 'react';
 import { useEscrowDetailState } from '@/hooks/useEscrowDetail';
 import { useSubmitWork, useApproveWork, useClaimTimeout } from '@/hooks/useEscrowActions';
+import { useProjectByPda, useSyncEscrowStatus } from '@/hooks/useProjectMetadata';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { EscrowProgress } from '@/components/escrow/EscrowProgress';
 import { CountdownTimer } from '@/components/escrow/CountdownTimer';
 import { EscrowCompletedView } from '@/components/escrow/EscrowCompletedView';
 import { EscrowSuccessModal, type EscrowCompletionData } from '@/components/escrow/EscrowSuccessModal';
+import { DeliverableLinks } from '@/components/escrow/DeliverableLinks';
 import { ConnectWalletPrompt } from '@/components/web3/ConnectWalletPrompt';
 import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import { Button } from '@/components/ui/button';
@@ -33,6 +35,7 @@ import {
   Send,
   Clock,
   Wifi,
+  FileText,
 } from 'lucide-react';
 
 interface EscrowDetailPageProps {
@@ -47,9 +50,13 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
   // Discriminated union — 5 possible states
   const state = useEscrowDetailState(pdaAddress);
 
+  // Off-chain Supabase metadata (non-blocking — null if not yet created)
+  const { data: metadata } = useProjectByPda(pdaAddress);
+
   const submitWork = useSubmitWork();
   const approveWork = useApproveWork();
   const claimTimeout = useClaimTimeout();
+  const syncStatus = useSyncEscrowStatus(pdaAddress);
 
   // Modal state — shown immediately after approveWork succeeds
   const [completionData, setCompletionData] = useState<EscrowCompletionData | null>(null);
@@ -157,10 +164,18 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
     : 'initialized';
 
   const handleSubmitWork = () => {
-    submitWork.mutate({
-      clientAddress: escrow.client,
-      pdaAddress: escrow.pdaAddress,
-    });
+    submitWork.mutate(
+      {
+        clientAddress: escrow.client,
+        pdaAddress: escrow.pdaAddress,
+      },
+      {
+        onSuccess: () => {
+          // Sync status to Supabase (non-blocking)
+          syncStatus.mutate({ status: 'submitted' });
+        },
+      }
+    );
   };
 
   const handleApproveWork = () => {
@@ -181,6 +196,9 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
           queryClient.invalidateQueries({ queryKey: ['escrows'] });
           queryClient.invalidateQueries({ queryKey: ['escrow-detail', pdaAddress] });
           queryClient.invalidateQueries({ queryKey: ['wallet-balance'] });
+
+          // Sync status to Supabase
+          syncStatus.mutate({ status: 'completed', completed_at: data.completedAt });
 
           // Show the animated success modal immediately
           setCompletionData({
@@ -238,7 +256,9 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <div className="flex items-center gap-3 mb-1 flex-wrap">
-                <h1 className="text-2xl font-bold text-foreground">Escrow Contract</h1>
+                <h1 className="text-2xl font-bold text-foreground">
+                  {metadata?.project_name ?? 'Escrow Contract'}
+                </h1>
                 <span
                   className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold"
                   style={{
@@ -352,6 +372,13 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
               className="data-[state=active]:bg-[rgba(57,255,20,0.1)] data-[state=active]:text-[#39ff14] rounded-lg"
             >
               Contract Actions
+            </TabsTrigger>
+            <TabsTrigger
+              value="deliverables"
+              className="data-[state=active]:bg-[rgba(57,255,20,0.1)] data-[state=active]:text-[#39ff14] rounded-lg"
+            >
+              <FileText className="size-3.5 mr-1.5" />
+              Deliverables
             </TabsTrigger>
             <TabsTrigger
               value="pda"
@@ -473,6 +500,53 @@ export default function EscrowDetailPage({ params }: EscrowDetailPageProps) {
                   </div>
                 </div>
               </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="deliverables">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <DeliverableLinks
+                pdaAddress={pdaAddress}
+                metadata={metadata ?? null}
+                isFreelancer={isFreelancer}
+              />
+
+              {/* Project info panel */}
+              {metadata && (
+                <div
+                  className="rounded-2xl p-5 space-y-4"
+                  style={{
+                    background: 'rgba(255,255,255,0.025)',
+                    border: '1px solid rgba(255,255,255,0.07)',
+                  }}
+                >
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[rgba(255,255,255,0.35)]">
+                    Project Info
+                  </h3>
+                  <div>
+                    <div className="label-caps mb-1 text-[#00eefc]">Project Name</div>
+                    <div className="text-sm font-semibold text-foreground">{metadata.project_name}</div>
+                  </div>
+                  {metadata.project_description && (
+                    <div>
+                      <div className="label-caps mb-1">Description</div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {metadata.project_description}
+                      </p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/[0.05]">
+                    <div>
+                      <div className="label-caps mb-1">Amount</div>
+                      <div className="text-sm font-bold text-[#39ff14]">{metadata.amount_sol} SOL</div>
+                    </div>
+                    <div>
+                      <div className="label-caps mb-1">Timeout</div>
+                      <div className="text-sm font-medium text-foreground">{metadata.timeout_days} days</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 
