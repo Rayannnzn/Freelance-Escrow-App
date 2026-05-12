@@ -9,7 +9,7 @@ export const SOLANA_RPC_URL =
 export const PROGRAM_ID =
   process.env.NEXT_PUBLIC_PROGRAM_ID || 'AErMH45vvaUGaSngNFmhyDeCXfBUfiduiWuZjAbeTUrG';
 
-export const SOL_TO_USD_RATE = 170; // Mock rate — replace with oracle
+export const SOL_TO_USD_RATE = 97; // Fallback — useSolPrice fetches live from CoinGecko
 
 export const MIN_ESCROW_AMOUNT = 0.01; // SOL — matches contract validation
 

@@ -14,6 +14,14 @@ export function formatUsd(amount: number): string {
   })} USD`;
 }
 
+/** Like formatUsd but uses a dynamic rate (e.g. from useSolPrice). */
+export function formatUsdWithRate(amount: number, rate: number): string {
+  return `$${(amount * rate).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} USD`;
+}
+
 export function truncateAddress(address: string, chars = 4): string {
   if (address.length <= chars * 2 + 3) return address;
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;

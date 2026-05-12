@@ -6,6 +6,7 @@ import { ArrowUp, ArrowDown, LucideIcon } from 'lucide-react';
 interface StatCardProps {
   title: string;
   value: string | number;
+  subtitle?: string;
   trend?: { value: number; direction: 'up' | 'down' };
   icon: LucideIcon;
   iconColor?: string;
@@ -23,6 +24,7 @@ const ACCENT_MAP = {
 export function StatCard({
   title,
   value,
+  subtitle,
   trend,
   icon: Icon,
   accent = 'neon',
@@ -56,8 +58,11 @@ export function StatCard({
         )}
       </div>
 
-      <div className="text-2xl font-bold text-foreground mb-1">{value}</div>
+      <div className="text-2xl font-bold text-foreground mb-0.5">{value}</div>
       <div className="label-caps">{title}</div>
+      {subtitle && (
+        <div className="text-xs text-muted-foreground mt-0.5">{subtitle}</div>
+      )}
     </div>
   );
 }

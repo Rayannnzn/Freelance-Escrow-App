@@ -8,6 +8,7 @@ import { ConnectWalletPrompt } from '@/components/web3/ConnectWalletPrompt';
 import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';
 import { useEnrichedEscrows } from '@/hooks/useEnrichedEscrows';
 import { useProjectsByWallet } from '@/hooks/useProjectMetadata';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
@@ -23,6 +24,7 @@ export default function DashboardPage() {
   const { connected, publicKey } = useWallet();
   const { data: escrows, isLoading } = useEnrichedEscrows();
   const { data: allProjects } = useProjectsByWallet(publicKey?.toBase58());
+  const { data: analytics } = useAnalytics();
 
   if (!connected) {
     return <ConnectWalletPrompt />;
@@ -69,7 +71,7 @@ export default function DashboardPage() {
 
       {/* Chart + Wallet */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
-        <ActivityChart />
+        <ActivityChart data={analytics?.chartData} />
         <WalletCard />
       </div>
 

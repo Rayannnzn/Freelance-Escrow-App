@@ -9,6 +9,7 @@ import { getEscrowPDA, PROGRAM_ID } from '@/lib/solana/program';
 import { parseEscrowError } from '@/lib/solana/errors';
 import { getExplorerTxUrl } from '@/lib/solana/explorer';
 import { saveCompletedEscrow } from '@/lib/escrow-cache';
+import { useNotifications } from './useNotifications';
 import { toast } from 'sonner';
 
 // ─── Initialize Escrow ──────────────────────────────────────────────────────
@@ -16,6 +17,7 @@ export function useInitializeEscrow() {
   const program = useAnchorProgram();
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
+  const { addNotification } = useNotifications();
 
   return useMutation({
     mutationFn: async ({
@@ -25,7 +27,7 @@ export function useInitializeEscrow() {
     }: {
       freelancerAddress: string;
       amountSol: number;
-      timeoutAt: number; // Unix timestamp in seconds
+      timeoutAt: number;
     }) => {
       if (!program || !publicKey) throw new Error('Wallet not connected');
 
@@ -47,6 +49,12 @@ export function useInitializeEscrow() {
       return { signature: tx, pdaAddress: escrowPDA.toBase58() };
     },
     onSuccess: (data) => {
+      addNotification(
+        'escrow_created',
+        'Escrow Created',
+        `New escrow locked on-chain. PDA: ${data.pdaAddress.slice(0, 8)}…`,
+        data.pdaAddress
+      );
       toast.success('Escrow created!', {
         description: `PDA: ${data.pdaAddress.slice(0, 8)}...${data.pdaAddress.slice(-6)}`,
         action: {
@@ -70,6 +78,7 @@ export function useSubmitWork() {
   const program = useAnchorProgram();
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
+  const { addNotification } = useNotifications();
 
   return useMutation({
     mutationFn: async ({
@@ -90,9 +99,15 @@ export function useSubmitWork() {
         })
         .rpc();
 
-      return { signature: tx };
+      return { signature: tx, pdaAddress };
     },
     onSuccess: (data) => {
+      addNotification(
+        'work_submitted',
+        'Work Submitted',
+        'Work has been submitted and is awaiting client approval.',
+        data.pdaAddress
+      );
       toast.success('Work submitted!', {
         description: 'Waiting for client approval.',
         action: {
@@ -116,12 +131,12 @@ export function useApproveWork() {
   const program = useAnchorProgram();
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
+  const { addNotification } = useNotifications();
 
   return useMutation({
     mutationFn: async ({
       freelancerAddress,
       pdaAddress,
-      // Snapshot data captured before tx so we can persist after PDA closes
       snapshot,
     }: {
       freelancerAddress: string;
@@ -140,7 +155,6 @@ export function useApproveWork() {
         })
         .rpc();
 
-      // ─── Cache the completed escrow BEFORE the query refetch wipes it ───
       saveCompletedEscrow({
         pdaAddress,
         client: snapshot.client,
@@ -160,12 +174,19 @@ export function useApproveWork() {
         completedAt: new Date().toISOString(),
       };
     },
+    onSuccess: (data) => {
+      addNotification(
+        'funds_released',
+        'Funds Released',
+        `${data.amountSol} SOL released to the freelancer. Contract complete.`,
+        data.pdaAddress
+      );
+    },
     onError: (error) => {
       const parsed = parseEscrowError(error);
       toast.error(parsed.title, { description: parsed.description });
     },
-    // Note: onSuccess is NOT here — the detail page handles it directly
-    // so it can show the success modal with the returned data.
+    // Note: onSuccess is NOT the primary handler — the detail page handles the modal.
   });
 }
 
@@ -174,6 +195,7 @@ export function useClaimTimeout() {
   const program = useAnchorProgram();
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
+  const { addNotification } = useNotifications();
 
   return useMutation({
     mutationFn: async ({
@@ -195,9 +217,15 @@ export function useClaimTimeout() {
         })
         .rpc();
 
-      return { signature: tx };
+      return { signature: tx, pdaAddress };
     },
     onSuccess: (data) => {
+      addNotification(
+        'timeout_claimed',
+        'Timeout Claimed',
+        'The escrow timed out and funds have been returned to the client.',
+        data.pdaAddress
+      );
       toast.success('Timeout claimed!', {
         description: 'Funds returned to the client.',
         action: {
