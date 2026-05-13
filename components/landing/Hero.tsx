@@ -54,7 +54,7 @@ export function Hero() {
                 Launch Dapp <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             </Link>
-            <Link href="https://github.com" target="_blank" rel="noreferrer">
+            <Link href="https://github.com/Rayannnzn/Freelance-Escrow-App" target="_blank" rel="noreferrer">
               <Button size="lg" variant="outline" className="w-full sm:w-auto bg-white/5 border-white/10 hover:bg-white/10 text-white transition-all h-14 px-8 rounded-full">
                 <Code className="w-5 h-5 mr-2" /> View Docs
               </Button>
